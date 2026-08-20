@@ -9,7 +9,9 @@ export const signIn = createServerFn({ method: "POST" })
     const { verifyPassword, startSession } = await import("./app-session.server");
     const { enforceRateLimit } = await import("./rate-limit.server");
     const { ensureAdminAccount } = await import("./admin-bootstrap.server");
-    enforceRateLimit("login");
+    // Rate-limit per account, not per IP: an entire lab of students shares one
+    // public IP, so an IP-keyed limit blocked legitimate simultaneous logins.
+    enforceRateLimit("login", `acct:${data.identifier.trim().toLowerCase()}`);
     // Provisions/repairs the ADMIN account from the server-side bootstrap
     // credentials before the credentials below are checked.
     await ensureAdminAccount(data.identifier);
