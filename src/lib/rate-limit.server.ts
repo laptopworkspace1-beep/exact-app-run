@@ -24,7 +24,9 @@ export function clientKey(): string {
 export type RateRule = { limit: number; windowSeconds: number };
 
 export const RATE_RULES = {
-  login: { limit: 12, windowSeconds: 60 },
+  // Keyed per account (see signIn), not per IP: a whole lab shares one public
+  // IP, so an IP-keyed login limit blocked simultaneous exam sign-ins.
+  login: { limit: 10, windowSeconds: 60 },
   register: { limit: 8, windowSeconds: 60 },
   run: { limit: 40, windowSeconds: 60 },
   submit: { limit: 60, windowSeconds: 60 },
