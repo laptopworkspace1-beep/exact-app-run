@@ -52,32 +52,38 @@ export function FloatingTimer({
   return (
     <div
       className={cn(
-        "fixed bottom-5 right-5 z-[100] w-44 rounded-xl border p-4 shadow-2xl backdrop-blur",
-        "bg-background/90",
-        urgent ? "border-destructive/50" : "border-border/70",
+        "pointer-events-none fixed inset-0 z-[100] flex items-center justify-center",
       )}
       role="timer"
       aria-live="off"
     >
-      <p className="mono-label text-[10px] tracking-widest text-muted-foreground">{label}</p>
-      <p
+      <div
         className={cn(
-          "mt-1 font-mono text-2xl font-bold tabular-nums",
-          urgent ? "text-destructive" : "text-foreground",
+          "w-44 rounded-xl border p-4 shadow-2xl backdrop-blur-[2px]",
+          "bg-background/40",
+          urgent ? "border-destructive/50" : "border-border/70",
         )}
       >
-        {h > 0 ? `${String(h).padStart(2, "0")}:` : ""}
-        {String(m).padStart(2, "0")}:{String(s).padStart(2, "0")}
-      </p>
-      <p className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-        <span
+        <p className="mono-label text-[10px] tracking-widest text-muted-foreground">{label}</p>
+        <p
           className={cn(
-            "inline-block size-2 rounded-full",
-            paused ? "bg-amber-500" : state === "LIVE" ? "animate-pulse bg-emerald-500" : "bg-muted-foreground",
+            "mt-1 font-mono text-2xl font-bold tabular-nums",
+            urgent ? "text-destructive" : "text-foreground",
           )}
-        />
-        {paused ? "PAUSED" : state}
-      </p>
+        >
+          {h > 0 ? `${String(h).padStart(2, "0")}:` : ""}
+          {String(m).padStart(2, "0")}:{String(s).padStart(2, "0")}
+        </p>
+        <p className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span
+            className={cn(
+              "inline-block size-2 rounded-full",
+              paused ? "bg-amber-500" : state === "LIVE" ? "animate-pulse bg-emerald-500" : "bg-muted-foreground",
+            )}
+          />
+          {paused ? "PAUSED" : state}
+        </p>
+      </div>
     </div>
   );
 }
