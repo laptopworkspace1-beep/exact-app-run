@@ -90,10 +90,10 @@ export const registerStudentAccount = createServerFn({ method: "POST" })
     const { ownDb, audit, newId, nowIso } = await import("./own-db.server");
     const { hashPassword, startSession } = await import("./app-session.server");
     const { enforceRateLimit } = await import("./rate-limit.server");
-    enforceRateLimit("register");
+    const code = data.batchNumber;
+    enforceRateLimit("register", `batch:${code.trim().toLowerCase()}`);
     const db = ownDb();
 
-    const code = data.batchNumber;
     const { getConfig } = await import("./app-config.server");
     const password = await getConfig("DEFAULT_STUDENT_PASSWORD");
     if (!password) throw new Error("Student sign-in is not configured. Contact an organiser.");
