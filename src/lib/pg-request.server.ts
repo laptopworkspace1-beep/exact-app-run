@@ -67,6 +67,9 @@ function createClient(url: string): PgClient {
     max: 1,
     idle_timeout: 10,
     connect_timeout: 8,
+    // Bound every statement: without this a saturated pooler queues a query
+    // forever and the student's run hangs with no error.
+    timeout: 20,
     prepare: false,
     onnotice: () => {},
   }) as unknown as PgClient;
@@ -109,6 +112,7 @@ export function throwawayPg(url: string): PgClient {
     max: 1,
     idle_timeout: 2,
     connect_timeout: 8,
+    timeout: 20,
     prepare: false,
     onnotice: () => {},
   }) as unknown as PgClient;
