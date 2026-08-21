@@ -747,6 +747,7 @@ export type PoolResult = ExecResult & { nodeId: string; assignedNodeId: string; 
  * runtime error, wrong output, TLE) are normal results and never fail over.
  */
 export async function runOnPistonPool(input: ExecInput): Promise<PoolResult | null> {
+  const t0 = Date.now();
   let all: PistonNode[];
   try {
     all = await listNodes();
@@ -780,26 +781,35 @@ export async function runOnPistonPool(input: ExecInput): Promise<PoolResult | nu
     }
   }
   if (!nodes.length) return null;
+  const tNodes = Date.now();
 
 
   const studentId = String(input.studentId ?? "");
   const roundId = String(input.roundId ?? "");
   const assigned = await assignedNodeFor(studentId, roundId, nodes).catch(() => nodes[0]!.nodeId);
   const ordered = orderFor(nodes, assigned);
+  const tAssign = Date.now();
 
   let attempts = 0;
   let lastError: ExecutionServiceError | null = null;
   const unreachable: string[] = [];
   const deadline = Date.now() + QUEUE_WAIT_MS;
+  let probeMs = 0;
+  let slotMs = 0;
+  let execMs = 0;
 
   for (const node of ordered) {
     if (attempts >= MAX_ATTEMPTS) break;
 
-    // A node whose status is not a fresh ONLINE observation is probed first, so
-    // a dead VM is skipped (and the next one used) instead of burning the
-    // student's run on a connection that will never answer.
-    if (node.healthStatus !== "ONLINE" || isStale(node)) {
+    // Only a node that is NOT currently ONLINE is probed first, so a dead VM
+    // is skipped instead of burning the student's run on a connection that
+    // will never answer. A merely *stale* ONLINE node is executed against
+    // directly — the run itself refreshes the health record, so the normal
+    // path never waits on a probe round trip.
+    if (node.healthStatus !== "ONLINE") {
+      const tProbe = Date.now();
       const probe = await checkNode(node).catch(() => null);
+      probeMs += Date.now() - tProbe;
       if (!probe || probe.status !== "ONLINE") {
         unreachable.push(`${node.nodeId}=${probe?.detail ?? "unreachable"}`);
         continue;
@@ -808,13 +818,21 @@ export async function runOnPistonPool(input: ExecInput): Promise<PoolResult | nu
     }
 
     // Bounded queue: wait for capacity on the assigned node before moving on,
-    // never send work to a node at maxConcurrentJobs.
+    // never send work to a node at maxConcurrentJobs. A node that stays full
+    // with no activity for minutes leaked its slots (interrupted requests),
+    // so try one reclaim before queueing against a phantom load.
+    const tSlot = Date.now();
     let slot = await acquireSlot(node.nodeId);
+    if (!slot && (await reclaimLeakedSlots(node.nodeId))) slot = await acquireSlot(node.nodeId);
     while (!slot && node.nodeId === assigned && Date.now() < deadline) {
       await sleep(QUEUE_POLL_MS);
       slot = await acquireSlot(node.nodeId);
     }
-    if (!slot) continue;
+    slotMs += Date.now() - tSlot;
+    if (!slot) {
+      console.warn(`[piston-pool] ${node.nodeId} is at capacity — trying the next node`);
+      continue;
+    }
 
 
     attempts += 1;
@@ -831,8 +849,9 @@ export async function runOnPistonPool(input: ExecInput): Promise<PoolResult | nu
         },
         input,
       );
-      await noteSuccess(node.nodeId);
-      await logExecution({
+      execMs += Date.now() - started;
+      const tPersist = Date.now();
+      await recordRun(node.nodeId, null, {
         submissionId: input.submissionId ?? null,
         studentId: studentId || null,
         roundId: roundId || null,
@@ -840,13 +859,20 @@ export async function runOnPistonPool(input: ExecInput): Promise<PoolResult | nu
         actualNodeId: node.nodeId,
         startedAt,
         endedAt: new Date().toISOString(),
-        durationMs: Date.now() - started,
+        durationMs: execMs,
         retryCount: attempts - 1,
         status: result.status ?? "ACCEPTED",
         failureReason: "",
       });
+      console.info(
+        `[piston-pool] run ok node=${node.nodeId} attempts=${attempts} ` +
+          `nodes=${tNodes - t0}ms assign=${tAssign - tNodes}ms probe=${probeMs}ms ` +
+          `slot=${slotMs}ms exec=${execMs}ms persist=${Date.now() - tPersist}ms ` +
+          `total=${Date.now() - t0}ms`,
+      );
       return { ...result, nodeId: node.nodeId, assignedNodeId: assigned ?? node.nodeId, attempts };
     } catch (err) {
+      execMs += Date.now() - started;
       const error =
         err instanceof ExecutionServiceError
           ? err
@@ -859,8 +885,7 @@ export async function runOnPistonPool(input: ExecInput): Promise<PoolResult | nu
       // help and the node is not at fault.
       if (error instanceof LanguageUnavailableError) throw error;
       console.error(`[piston-pool] ${node.nodeId} failed: ${error.detail}`);
-      await noteFailure(node.nodeId, error.detail);
-      await logExecution({
+      await recordRun(node.nodeId, error.detail, {
         submissionId: input.submissionId ?? null,
         studentId: studentId || null,
         roundId: roundId || null,
