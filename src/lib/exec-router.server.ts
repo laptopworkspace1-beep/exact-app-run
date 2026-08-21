@@ -338,6 +338,10 @@ export async function routeExecution(input: ExecInput): Promise<RoutedResult> {
     try {
       const { runOnPistonPool } = await import("./piston-pool.server");
       const pooled = await runOnPistonPool({ ...input, language });
+      console.info(
+        `[execution] piston pool ${pooled ? "served" : "declined"} purpose=${purpose} ` +
+          `language=${language} ms=${Date.now() - poolStarted}`,
+      );
       if (pooled) {
         await writeExecutionRecord({
           executionId,

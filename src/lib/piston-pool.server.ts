@@ -913,6 +913,12 @@ export async function runOnPistonPool(input: ExecInput): Promise<PoolResult | nu
     }
   }
 
+  console.warn(
+    `[piston-pool] run failed attempts=${attempts} nodes=${tNodes - t0}ms ` +
+      `assign=${tAssign - tNodes}ms probe=${probeMs}ms slot=${slotMs}ms exec=${execMs}ms ` +
+      `total=${Date.now() - t0}ms unreachable=[${unreachable.join("; ")}] ` +
+      `lastError=${lastError?.detail ?? "none"}`,
+  );
   if (lastError) throw lastError;
   if (unreachable.length) {
     // Nodes are configured but none of them answered: report an outage, not a
