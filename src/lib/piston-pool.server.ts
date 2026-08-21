@@ -470,31 +470,33 @@ async function releaseSlot(nodeId: string): Promise<void> {
   }
 }
 
-async function logExecution(entry: Omit<PistonExecutionLog, "id">): Promise<void> {
+/**
+ * Self-heal for capacity leaked by interrupted requests. A slot is held for at
+ * most ~60s (the execution fetch budget); when the hosting runtime kills a
+ * request mid-run the release in `finally` never happens and the counter stays
+ * elevated forever. A node that is still full while its row has been untouched
+ * for 3 minutes has provably lost those releases, so reset it and let the
+ * caller retry immediately instead of queueing against a phantom load.
+ */
+async function reclaimLeakedSlots(nodeId: string): Promise<boolean> {
   try {
     const client = await schema();
-    await client.unsafe(
-      `insert into codearena_private.piston_executions
-         (submission_id, student_id, round_id, assigned_node_id, actual_node_id,
-          started_at, ended_at, duration_ms, retry_count, status, failure_reason)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-      [
-        entry.submissionId,
-        entry.studentId,
-        entry.roundId,
-        entry.assignedNodeId,
-        entry.actualNodeId,
-        entry.startedAt,
-        entry.endedAt,
-        entry.durationMs,
-        entry.retryCount,
-        entry.status,
-        entry.failureReason.slice(0, 500),
-      ],
+    const rows = await client.unsafe(
+      `update codearena_private.piston_nodes
+          set current_load = 0,
+              last_error = 'capacity reset: slots leaked by interrupted requests',
+              updated_at = now()
+        where node_id = $1
+          and current_load >= max_concurrent_jobs
+          and updated_at < now() - interval '3 minutes'
+        returning node_id`,
+      [nodeId],
     );
+    if (rows.length) console.warn(`[piston-pool] reclaimed leaked capacity on ${nodeId}`);
+    return rows.length > 0;
   } catch (err) {
-    // Telemetry must never break a student's run.
-    console.error("[piston-pool] could not persist execution log", err);
+    console.error("[piston-pool] could not reclaim leaked capacity", err);
+    return false;
   }
 }
 
