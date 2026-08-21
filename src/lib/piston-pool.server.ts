@@ -700,6 +700,24 @@ const MAX_ATTEMPTS = 3;
 const QUEUE_WAIT_MS = 15_000;
 const QUEUE_POLL_MS = 300;
 
+/**
+ * Short-lived node-list snapshot for the run hot path. Capacity is still
+ * enforced atomically by acquireSlot in the database and health is refreshed
+ * by the executions themselves, so a couple of seconds of staleness is safe —
+ * and it removes one cross-region database round trip from nearly every run
+ * during a burst of students.
+ */
+let nodeListCache: { at: number; nodes: PistonNode[] } | null = null;
+const NODE_LIST_TTL_MS = 2_000;
+
+async function listNodesForRun(): Promise<PistonNode[]> {
+  const cached = nodeListCache;
+  if (cached && Date.now() - cached.at < NODE_LIST_TTL_MS) return cached.nodes;
+  const nodes = await listNodes();
+  nodeListCache = { at: Date.now(), nodes };
+  return nodes;
+}
+
 /** Nodes that may currently receive work: enabled and not known-offline. */
 function usableNodes(nodes: PistonNode[]): PistonNode[] {
   return nodes.filter((node) => node.enabled && node.url.trim() && node.healthStatus !== "OFFLINE");
@@ -756,7 +774,7 @@ export async function runOnPistonPool(input: ExecInput): Promise<PoolResult | nu
   const t0 = Date.now();
   let all: PistonNode[];
   try {
-    all = await listNodes();
+    all = await listNodesForRun();
   } catch (err) {
     console.error("[piston-pool] node pool unavailable", err);
     return null;
