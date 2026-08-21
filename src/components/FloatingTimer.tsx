@@ -52,14 +52,15 @@ export function FloatingTimer({
   return (
     <div
       className={cn(
-        "pointer-events-none fixed inset-0 z-[100] flex items-center justify-center",
+        "pointer-events-none fixed right-4 top-20 z-[100] flex justify-end sm:right-6",
       )}
       role="timer"
       aria-live="off"
+      style={{ opacity: 0.65 }}
     >
       <div
         className={cn(
-          "w-44 rounded-xl border p-4 shadow-2xl backdrop-blur-[2px]",
+          "w-40 rounded-xl border p-3 shadow-2xl backdrop-blur-[2px] sm:w-44 sm:p-4",
           "bg-background/40",
           urgent ? "border-destructive/50" : "border-border/70",
         )}
