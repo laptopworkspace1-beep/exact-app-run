@@ -402,24 +402,30 @@ async function recordRun(
 ): Promise<void> {
   try {
     const client = await schema();
+    // One statement (CTEs), not two: postgres.js sends multi-command strings
+    // as prepared statements, which PostgreSQL rejects — and every extra
+    // round trip adds latency to the student's run anyway.
     await client.unsafe(
-      `update codearena_private.piston_nodes
-          set total_executions = total_executions + case when $1 then 1 else 0 end,
-              total_failures = total_failures + case when $1 then 0 else 1 end,
-              failure_count = case when $1 then 0 else failure_count + 1 end,
-              health_status = case
-                                when $1 then 'ONLINE'
-                                when failure_count + 1 >= 2 then 'UNHEALTHY'
-                                else health_status
-                              end,
-              last_error = $2,
-              last_health_check = case when $1 then now() else last_health_check end,
-              updated_at = now()
-        where node_id = $3;
+      `with node_update as (
+         update codearena_private.piston_nodes
+            set total_executions = total_executions + case when $1 then 1 else 0 end,
+                total_failures = total_failures + case when $1 then 0 else 1 end,
+                failure_count = case when $1 then 0 else failure_count + 1 end,
+                health_status = case
+                                  when $1 then 'ONLINE'
+                                  when failure_count + 1 >= 2 then 'UNHEALTHY'
+                                  else health_status
+                                end,
+                last_error = $2,
+                last_health_check = case when $1 then now() else last_health_check end,
+                updated_at = now()
+          where node_id = $3
+          returning node_id
+       )
        insert into codearena_private.piston_executions
          (submission_id, student_id, round_id, assigned_node_id, actual_node_id,
           started_at, ended_at, duration_ms, retry_count, status, failure_reason)
-       values ($4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+       select $4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14 from node_update`,
       [
         failure === null,
         (failure ?? "").slice(0, 500),
