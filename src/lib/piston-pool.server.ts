@@ -386,32 +386,61 @@ async function saveNodeHealth(
   );
 }
 
-async function noteFailure(nodeId: string, reason: string): Promise<void> {
-  const client = await schema();
-  await client.unsafe(
-    `update codearena_private.piston_nodes
-        set failure_count = failure_count + 1,
-            total_failures = total_failures + 1,
-            health_status = case when failure_count + 1 >= 2 then 'UNHEALTHY' else health_status end,
-            last_error = $2,
-            updated_at = now()
-      where node_id = $1`,
-    [nodeId, reason.slice(0, 500)],
-  );
-}
-
-async function noteSuccess(nodeId: string): Promise<void> {
-  const client = await schema();
-  await client.unsafe(
-    `update codearena_private.piston_nodes
-        set total_executions = total_executions + 1,
-            failure_count = 0,
-            health_status = 'ONLINE',
-            last_error = '',
-            updated_at = now()
-      where node_id = $1`,
-    [nodeId],
-  );
+/**
+ * Post-run bookkeeping in ONE round trip: updates the node counters/health and
+ * appends the execution log together. These were previously separate
+ * statements, and every round trip to the database adds real latency to each
+ * individual student run.
+ *
+ * A success also refreshes `last_health_check`: a node that is actively
+ * serving runs is proven healthy, so it stays out of the probe path.
+ */
+async function recordRun(
+  nodeId: string,
+  failure: string | null,
+  entry: Omit<PistonExecutionLog, "id">,
+): Promise<void> {
+  try {
+    const client = await schema();
+    await client.unsafe(
+      `update codearena_private.piston_nodes
+          set total_executions = total_executions + case when $1 then 1 else 0 end,
+              total_failures = total_failures + case when $1 then 0 else 1 end,
+              failure_count = case when $1 then 0 else failure_count + 1 end,
+              health_status = case
+                                when $1 then 'ONLINE'
+                                when failure_count + 1 >= 2 then 'UNHEALTHY'
+                                else health_status
+                              end,
+              last_error = $2,
+              last_health_check = case when $1 then now() else last_health_check end,
+              updated_at = now()
+        where node_id = $3;
+       insert into codearena_private.piston_executions
+         (submission_id, student_id, round_id, assigned_node_id, actual_node_id,
+          started_at, ended_at, duration_ms, retry_count, status, failure_reason)
+       values ($4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+      [
+        failure === null,
+        (failure ?? "").slice(0, 500),
+        nodeId,
+        entry.submissionId,
+        entry.studentId,
+        entry.roundId,
+        entry.assignedNodeId,
+        entry.actualNodeId,
+        entry.startedAt,
+        entry.endedAt,
+        entry.durationMs,
+        entry.retryCount,
+        entry.status,
+        entry.failureReason.slice(0, 500),
+      ],
+    );
+  } catch (err) {
+    // Telemetry must never break a student's run.
+    console.error("[piston-pool] could not persist run bookkeeping", err);
+  }
 }
 
 /** Bounded concurrency: claims a slot only when the node is below capacity. */
@@ -524,7 +553,10 @@ export async function checkNode(node: PistonNode, persist = true): Promise<NodeH
     const payload = await providerJson(
       finalUrl,
       { method: "GET", headers: { accept: "application/json" } },
-      node.timeoutMs || HEALTH_TIMEOUT_MS,
+      // A probe must answer quickly even when the node allows long-running
+      // executions, so a hung VM can never stall a student's run for the full
+      // execution timeout.
+      Math.min(node.timeoutMs || HEALTH_TIMEOUT_MS, HEALTH_TIMEOUT_MS),
       `Piston ${node.nodeId}`,
       "/api/v2/runtimes",
     );
