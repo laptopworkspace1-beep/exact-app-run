@@ -951,7 +951,6 @@ export const runCodeWithInput = createServerFn({ method: "POST" })
     await recordAttempt(claims.studentId, data.problemId, "CODE", "runAttempts");
 
     const stdin = data.stdin ?? "";
-    const stdin = data.stdin ?? "";
     const t0 = Date.now();
     try {
       const run = await executeCode({
