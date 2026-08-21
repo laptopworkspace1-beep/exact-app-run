@@ -951,6 +951,8 @@ export const runCodeWithInput = createServerFn({ method: "POST" })
     await recordAttempt(claims.studentId, data.problemId, "CODE", "runAttempts");
 
     const stdin = data.stdin ?? "";
+    const stdin = data.stdin ?? "";
+    const t0 = Date.now();
     try {
       const run = await executeCode({
         language,
@@ -961,6 +963,10 @@ export const runCodeWithInput = createServerFn({ method: "POST" })
         studentId: claims.studentId,
         roundId: str(problem["roundId"]),
       });
+      console.info(
+        `[run-timing] runCodeWithInput student=${claims.studentId} problem=${data.problemId} ` +
+          `outcome=${run.outcome} execMs=${Date.now() - t0}`,
+      );
       return {
         serviceAvailable: true,
         outcome: run.outcome,
