@@ -503,6 +503,7 @@ const debugRunInput = z.object({
 export const runDebugCode = createServerFn({ method: "POST" })
   .inputValidator((input: z.infer<typeof debugRunInput>) => debugRunInput.parse(input))
   .handler(async ({ data }) => {
+    const t0 = Date.now();
     const { requireStudent } = await import("./app-session.server");
     const { ownDb } = await import("./own-db.server");
     const { getRound, requireWritableAttempt, str } = await import("./comp.server");
@@ -539,6 +540,10 @@ export const runDebugCode = createServerFn({ method: "POST" })
       compileOnly,
       studentId: claims.studentId,
     });
+    console.info(
+      `[run-timing] runDebugCode student=${claims.studentId} problem=${data.problemId} ` +
+        `mode=${compileOnly ? "COMPILE" : "RUN"} status=${result.status} totalMs=${Date.now() - t0}`,
+    );
     return {
       status: result.status,
       compiled: result.compiled,
@@ -804,6 +809,7 @@ export const compileCode = createServerFn({ method: "POST" })
     await requireWritableAttempt(claims.studentId, round);
     await recordAttempt(claims.studentId, data.problemId, "CODE", "compileAttempts");
 
+    const t0 = Date.now();
     try {
       const run = await executeCode({
         language,
@@ -814,6 +820,10 @@ export const compileCode = createServerFn({ method: "POST" })
         studentId: claims.studentId,
         roundId: str(problem["roundId"]),
       });
+      console.info(
+        `[run-timing] compileCode student=${claims.studentId} problem=${data.problemId} ` +
+          `outcome=${run.outcome} execMs=${Date.now() - t0}`,
+      );
       return {
         serviceAvailable: true,
         compiled: run.outcome !== "compilation_error",
@@ -883,12 +893,17 @@ export const runCode = createServerFn({ method: "POST" })
       .eq("isHidden", false)
       .order("orderNo", { ascending: true });
 
+    const t0 = Date.now();
     const result = await judgeSubmission(
       language,
       data.code,
       (tests ?? []) as Row[],
       problem as Row,
       { studentId: claims.studentId, roundId: str(problem["roundId"]) },
+    );
+    console.info(
+      `[run-timing] runCode student=${claims.studentId} problem=${data.problemId} ` +
+        `tests=${(tests ?? []).length} status=${result.status} judgeMs=${Date.now() - t0}`,
     );
 
     return {
@@ -941,6 +956,7 @@ export const runCodeWithInput = createServerFn({ method: "POST" })
     await recordAttempt(claims.studentId, data.problemId, "CODE", "runAttempts");
 
     const stdin = data.stdin ?? "";
+    const t0 = Date.now();
     try {
       const run = await executeCode({
         language,
@@ -951,6 +967,10 @@ export const runCodeWithInput = createServerFn({ method: "POST" })
         studentId: claims.studentId,
         roundId: str(problem["roundId"]),
       });
+      console.info(
+        `[run-timing] runCodeWithInput student=${claims.studentId} problem=${data.problemId} ` +
+          `outcome=${run.outcome} execMs=${Date.now() - t0}`,
+      );
       return {
         serviceAvailable: true,
         outcome: run.outcome,
